@@ -236,6 +236,37 @@ body {
   color: #a8dadc;
 }
 
+.level-up-toggle {
+  background: linear-gradient(135deg, #4a5568 0%, #2d3748 100%);
+  border: 2px solid #718096;
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #e2e8f0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+
+.level-up-toggle:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  background: linear-gradient(135deg, #5a6578 0%, #3d4758 100%);
+}
+
+.level-up-toggle.active {
+  background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+  border-color: #68d391;
+  color: #fff;
+  box-shadow: 0 0 12px rgba(72, 187, 120, 0.4);
+}
+
+.level-up-toggle.active:hover {
+  background: linear-gradient(135deg, #68d391 0%, #48bb78 100%);
+}
+
 .image-container {
   margin: 0;
 }
@@ -243,6 +274,7 @@ body {
 .image-container img {
   width: 100%;
   max-width: 200px;
+  max-height: 200px;
   border-radius: 50%;
   border: 3px solid #fff;
   margin: 0;
@@ -270,6 +302,13 @@ body {
 
 .card h3 { margin: 5px 0; word-wrap: break-word; }
 .card small { text-transform: uppercase; font-weight: bold; color: #666; font-size: 0.75rem; word-wrap: break-word; }
+.card small.recall-cost { 
+  display: block;
+  color: #8b4513; 
+  font-size: 0.7rem; 
+  margin-top: 2px;
+  font-weight: 600;
+}
 .card p { margin: 0.5em 0; word-wrap: break-word; overflow-wrap: break-word; }
 .card p:first-child { margin-top: 0; }
 .card p:last-child { margin-bottom: 0; }
@@ -392,6 +431,7 @@ body {
   line-height: 1;
   flex-shrink: 0;
   min-width: 0.95rem;
+  position: relative;
 }
 
 .stat-icon-filled {
@@ -400,6 +440,18 @@ body {
 
 .stat-icon-empty {
   opacity: 0.3;
+}
+
+.stat-icon-crossed::after {
+  content: '✕';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.7rem;
+  font-weight: bold;
+  color: #000;
+  text-shadow: none;
 }
 
 /* ========== CHARACTER ATTRIBUTES ========== */
@@ -465,22 +517,16 @@ body {
 }
 
 .attribute-mark {
-  background: transparent;
-  border: none;
-  font-size: 1rem;
-  cursor: pointer;
-  color: #8d99ae;
-  padding: 0;
-  line-height: 1;
-  transition: color 0.15s ease, transform 0.15s ease;
-}
-
-.attribute-mark:hover {
-  transform: scale(1.2);
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  opacity: 0.5;
+  filter: invert(70%) sepia(10%) saturate(300%) hue-rotate(190deg) brightness(90%);
 }
 
 .attribute-mark.marked {
-  color: #e63946;
+  opacity: 1;
+  filter: invert(27%) sepia(94%) saturate(2000%) hue-rotate(340deg) brightness(90%) contrast(95%);
 }
 
 .secondary-stats {
@@ -603,16 +649,17 @@ body {
   }
 
   .card-deck-desktop .card {
-    width: 90%;
-    height: 380px;
+    width: 95%;
+    min-height: 300px;
+    max-height: 350px;
     overflow-y: auto;
     flex-shrink: 0;
   }
 
   .inventory-section {
     flex: 0 0 30%;
-    max-height: 20%;
-    min-height: 0;
+    max-height: 25%;
+    min-height: 20%;
     display: flex;
     flex-direction: column;
   }
@@ -635,12 +682,12 @@ body {
 
   /* Inventory cards: 120px × 120px */
   .inventory-section .inventory-card {
-    width: 120px;
-    height: 120px;
-    min-width: 120px;
-    max-width: 120px;
-    min-height: 120px;
-    max-height: 120px;
+    width: 150px;
+    height: 140px;
+    min-width: 150px;
+    max-width: 150px;
+    min-height: 140px;
+    max-height: 140px;
     overflow-y: auto;
     flex-shrink: 0;
   }
@@ -671,10 +718,10 @@ body {
 
   /* Equipment cards: 230px × 230px */
   .equipment-section .equipment-card {
-    width: 220px;
+    width: 275px;
     height: 220px;
-    min-width: 220px;
-    max-width: 220px;
+    min-width: 275px;
+    max-width: 275px;
     min-height: 220px;
     max-height: 220px;
     overflow-y: auto;
@@ -682,7 +729,8 @@ body {
   }
 
   .equipment-section {
-    max-height: 30%;
+    max-height: 27%;
+    min-height: 23%;
   }
 
   .sheet-container {
@@ -695,8 +743,8 @@ body {
     flex-direction: row;
     align-items: stretch;
     flex: 0 0 70%;
-    min-height: 0; /* Allow shrinking */
-    max-height: 70%;
+    min-height: 56%; /* Allow shrinking */
+    max-height: 56%;
   }
   
   .side-column {
@@ -706,7 +754,7 @@ body {
   }
   
   .center-column {
-    flex: 1.35; /* Fixed width for character section */
+    flex: 1.1; /* Fixed width for character section */
     overflow-y: auto;
   }
 
@@ -742,12 +790,12 @@ body {
   }
   
   .attribute-box {
-    width: 70px;
-    height: 60px;
-    min-width: 70px;
-    max-width: 70px;
-    min-height: 60px;
-    max-height: 60px;
+    width: 90px;
+    height: 65px;
+    min-width: 90px;
+    max-width: 90px;
+    min-height: 70px;
+    max-height: 70px;
     padding: 6px 8px;
     box-sizing: border-box;
   }
@@ -757,7 +805,7 @@ body {
   }
   
   .attribute-name {
-    font-size: 0.55rem;
+    font-size: 0.6rem;
   }
 
   .inventory-desktop {

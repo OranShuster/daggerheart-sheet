@@ -10,8 +10,80 @@ import {
   traitCards, 
   inventoryItems, 
   domainCards,
-  equipmentItems
+  equipmentItems,
+  levelUpCharacter,
+  levelUpDomainCards
 } from './characterData';
+import circleIcon from './assets/circle.png';
+import roundIcon from './assets/round.png';
+
+// Types and helpers for localStorage persistence
+type SavedStats = {
+  hp: number;
+  armor: number;
+  stress: number;
+  hope: number;
+};
+
+const STORAGE_KEY = 'daggerheart-character-stats';
+const LEVEL_UP_KEY = 'daggerheart-leveled-up';
+
+// Helper to merge character data when leveling up
+function mergeCharacterForLevelUp(
+  base: CharacterData,
+  levelUp: Partial<CharacterData>,
+  currentStats: { hp: number; armor: number; stress: number; hope: number }
+): CharacterData {
+  return {
+    ...base,
+    level: levelUp.level ?? base.level,
+    stats: {
+      // Preserve current values for HP, armor, stress, hope
+      hp: { 
+        current: Math.min(currentStats.hp, levelUp.stats?.hp.max ?? base.stats.hp.max), 
+        max: levelUp.stats?.hp.max ?? base.stats.hp.max 
+      },
+      stress: { 
+        current: Math.min(currentStats.stress, levelUp.stats?.stress.max ?? base.stats.stress.max), 
+        max: levelUp.stats?.stress.max ?? base.stats.stress.max 
+      },
+      hope: { 
+        current: Math.min(currentStats.hope, levelUp.stats?.hope.max ?? base.stats.hope.max), 
+        max: levelUp.stats?.hope.max ?? base.stats.hope.max 
+      },
+      armor: { 
+        current: Math.min(currentStats.armor, levelUp.stats?.armor.max ?? base.stats.armor.max), 
+        max: levelUp.stats?.armor.max ?? base.stats.armor.max 
+      },
+      // Override evasion
+      evasion: levelUp.stats?.evasion ?? base.stats.evasion,
+    },
+    // Override attributes
+    attributes: levelUp.attributes ?? base.attributes,
+    // Override thresholds
+    thresholds: levelUp.thresholds ?? base.thresholds,
+  };
+}
+
+function loadSavedStats(): SavedStats | null {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      return JSON.parse(saved) as SavedStats;
+    }
+  } catch (e) {
+    console.error('Failed to load saved stats:', e);
+  }
+  return null;
+}
+
+function saveStats(stats: SavedStats): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stats));
+  } catch (e) {
+    console.error('Failed to save stats:', e);
+  }
+}
 
 // Card Title Component for Hidden Cards
 type CardTitleProps = {
@@ -147,6 +219,9 @@ function CardDeck({ cards, title, variant = 'default' }: CardDeckProps) {
               {isTop && !isExiting ? (
                 <>
                   {variant !== 'inventory' && card.type && <small>{card.type}</small>}
+                  {variant === 'domain' && card.recallCost !== undefined && (
+                    <small className="recall-cost">Recall Cost: {card.recallCost}</small>
+                  )}
                   <h3>{card.title}</h3>
                   <ReactMarkdown>{card.text}</ReactMarkdown>
                 </>
@@ -168,10 +243,9 @@ function CardDeck({ cards, title, variant = 'default' }: CardDeckProps) {
 type AttributeBoxProps = {
   name: string;
   stat: CharacterStat;
-  onToggleMark?: () => void;
 };
 
-function AttributeBox({ name, stat, onToggleMark }: AttributeBoxProps) {
+function AttributeBox({ name, stat }: AttributeBoxProps) {
   const formatValue = (val: number) => (val >= 0 ? `+${val}` : `${val}`);
   
   return (
@@ -181,13 +255,11 @@ function AttributeBox({ name, stat, onToggleMark }: AttributeBoxProps) {
         {name}
         {stat.isMagicStat && <span className="magic-indicator" title="Spellcast Trait">✨</span>}
       </div>
-      <button 
+      <img 
+        src={stat.marked ? roundIcon : circleIcon} 
+        alt={stat.marked ? 'marked' : 'unmarked'}
         className={`attribute-mark ${stat.marked ? 'marked' : ''}`}
-        onClick={onToggleMark}
-        title={stat.marked ? 'Unmark' : 'Mark'}
-      >
-        {stat.marked ? '●' : '○'}
-      </button>
+      />
     </div>
   );
 }
@@ -202,10 +274,11 @@ type StatBoxProps = {
   textDark?: boolean;
   editable?: boolean;
   singleValue?: boolean;
+  showXWhenEmpty?: boolean;
   onCurrentChange?: (value: number) => void;
 };
 
-function StatBox({ label, current, max, color, icon, textDark, editable, singleValue, onCurrentChange }: StatBoxProps) {
+function StatBox({ label, current, max, color, icon, textDark, editable, singleValue, showXWhenEmpty, onCurrentChange }: StatBoxProps) {
   const textColor = textDark ? '#333' : '#fff';
 
   const handleIncrement = () => {
@@ -224,11 +297,6 @@ function StatBox({ label, current, max, color, icon, textDark, editable, singleV
     <div className="stat-box" style={{ backgroundColor: color, color: textColor }}>
       <div className="stat-header">
         <span className="stat-label">{label}</span>
-        {!singleValue && (
-          <span className="stat-value-box">
-            {current} / {max}
-          </span>
-        )}
       </div>
       <div className="stat-controls">
         {editable && !singleValue && (
@@ -247,7 +315,7 @@ function StatBox({ label, current, max, color, icon, textDark, editable, singleV
             return (
               <span
                 key={index}
-                className={`stat-icon ${isFilled ? 'stat-icon-filled' : 'stat-icon-empty'}`}
+                className={`stat-icon ${isFilled ? 'stat-icon-filled' : 'stat-icon-empty'} ${showXWhenEmpty ? 'stat-icon-crossed' : ''}`}
                 style={{ textShadow: '-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000' }}
               >
                 {icon}
@@ -282,8 +350,99 @@ function App() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Character state initialized from characterData
-  const [character, setCharacter] = useState<CharacterData>(initialCharacter);
+  // Level up toggle state with localStorage persistence
+  const [isLeveledUp, setIsLeveledUp] = useState(() => {
+    try {
+      return localStorage.getItem(LEVEL_UP_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleLevelUp = () => {
+    setIsLeveledUp(prev => {
+      const newValue = !prev;
+      try {
+        localStorage.setItem(LEVEL_UP_KEY, String(newValue));
+      } catch (e) {
+        console.error('Failed to save level up state:', e);
+      }
+      return newValue;
+    });
+  };
+
+  // Character state initialized from characterData with localStorage persistence
+  const [character, setCharacter] = useState<CharacterData>(() => {
+    const saved = loadSavedStats();
+    if (saved) {
+      // Use saved values for current stats
+      return {
+        ...initialCharacter,
+        stats: {
+          ...initialCharacter.stats,
+          hp: { ...initialCharacter.stats.hp, current: saved.hp },
+          armor: { ...initialCharacter.stats.armor, current: saved.armor },
+          stress: { ...initialCharacter.stats.stress, current: saved.stress },
+          hope: { ...initialCharacter.stats.hope, current: saved.hope },
+        }
+      };
+    } else {
+      // No saved data - set current to max and save
+      const defaultStats: SavedStats = {
+        hp: initialCharacter.stats.hp.max,
+        armor: initialCharacter.stats.armor.max,
+        stress: initialCharacter.stats.stress.max,
+        hope: initialCharacter.stats.hope.max,
+      };
+      saveStats(defaultStats);
+      return {
+        ...initialCharacter,
+        stats: {
+          ...initialCharacter.stats,
+          hp: { ...initialCharacter.stats.hp, current: defaultStats.hp },
+          armor: { ...initialCharacter.stats.armor, current: defaultStats.armor },
+          stress: { ...initialCharacter.stats.stress, current: defaultStats.stress },
+          hope: { ...initialCharacter.stats.hope, current: defaultStats.hope },
+        }
+      };
+    }
+  });
+
+  // Compute the displayed character based on level up state
+  const displayedCharacter = isLeveledUp
+    ? mergeCharacterForLevelUp(initialCharacter, levelUpCharacter, {
+        hp: character.stats.hp.current,
+        armor: character.stats.armor.current,
+        stress: character.stats.stress.current,
+        hope: character.stats.hope.current,
+      })
+    : character;
+
+  // Compute the active domain cards (combined when leveled up)
+  const activeDomainCards = isLeveledUp
+    ? [...domainCards, ...levelUpDomainCards]
+    : domainCards;
+
+  // Helper to update a stat and save to localStorage
+  const updateStatAndSave = (statKey: 'hp' | 'armor' | 'stress' | 'hope', value: number) => {
+    setCharacter(prev => {
+      const newCharacter = {
+        ...prev,
+        stats: { 
+          ...prev.stats, 
+          [statKey]: { ...prev.stats[statKey], current: value } 
+        }
+      };
+      // Save all current stats to localStorage
+      saveStats({
+        hp: newCharacter.stats.hp.current,
+        armor: newCharacter.stats.armor.current,
+        stress: newCharacter.stats.stress.current,
+        hope: newCharacter.stats.hope.current,
+      });
+      return newCharacter;
+    });
+  };
 
   return (
     <div className="sheet-container">
@@ -293,138 +452,75 @@ function App() {
         {/* --- MIDDLE COLUMN: Stats & Image --- */}
         <div className="column center-column">
           <header className="character-header">
-            <h1>{character.name}</h1>
+            <h1>{displayedCharacter.name}</h1>
             <span className="header-divider">•</span>
-            <span className="subtitle">Lvl {character.level} {character.class}</span>
+            <span className="subtitle">Lvl {displayedCharacter.level} {displayedCharacter.class}</span>
+            <button 
+              className={`level-up-toggle ${isLeveledUp ? 'active' : ''}`}
+              onClick={toggleLevelUp}
+              title={'Toggle level up'}
+            >
+              ⬆️ Lvl {levelUpCharacter.level}
+            </button>
           </header>
 
           <div className="image-container">
-            <img src={character.image} alt="Character" />
+            <img src={displayedCharacter.image} alt="Character" />
           </div>
 
           <div className="attributes-row">
-            <AttributeBox 
-              name="Agility" 
-              stat={character.attributes.agility}
-              onToggleMark={() => setCharacter(prev => ({
-                ...prev,
-                attributes: { 
-                  ...prev.attributes, 
-                  agility: { ...prev.attributes.agility, marked: !prev.attributes.agility.marked } 
-                }
-              }))}
-            />
-            <AttributeBox 
-              name="Strength" 
-              stat={character.attributes.strength}
-              onToggleMark={() => setCharacter(prev => ({
-                ...prev,
-                attributes: { 
-                  ...prev.attributes, 
-                  strength: { ...prev.attributes.strength, marked: !prev.attributes.strength.marked } 
-                }
-              }))}
-            />
-            <AttributeBox 
-              name="Finesse" 
-              stat={character.attributes.finesse}
-              onToggleMark={() => setCharacter(prev => ({
-                ...prev,
-                attributes: { 
-                  ...prev.attributes, 
-                  finesse: { ...prev.attributes.finesse, marked: !prev.attributes.finesse.marked } 
-                }
-              }))}
-            />
-            <AttributeBox 
-              name="Instinct" 
-              stat={character.attributes.instinct}
-              onToggleMark={() => setCharacter(prev => ({
-                ...prev,
-                attributes: { 
-                  ...prev.attributes, 
-                  instinct: { ...prev.attributes.instinct, marked: !prev.attributes.instinct.marked } 
-                }
-              }))}
-            />
-            <AttributeBox 
-              name="Presence" 
-              stat={character.attributes.presence}
-              onToggleMark={() => setCharacter(prev => ({
-                ...prev,
-                attributes: { 
-                  ...prev.attributes, 
-                  presence: { ...prev.attributes.presence, marked: !prev.attributes.presence.marked } 
-                }
-              }))}
-            />
-            <AttributeBox 
-              name="Knowledge" 
-              stat={character.attributes.knowledge}
-              onToggleMark={() => setCharacter(prev => ({
-                ...prev,
-                attributes: { 
-                  ...prev.attributes, 
-                  knowledge: { ...prev.attributes.knowledge, marked: !prev.attributes.knowledge.marked } 
-                }
-              }))}
-            />
+            <AttributeBox name="Agility" stat={displayedCharacter.attributes.agility} />
+            <AttributeBox name="Strength" stat={displayedCharacter.attributes.strength} />
+            <AttributeBox name="Finesse" stat={displayedCharacter.attributes.finesse} />
+            <AttributeBox name="Instinct" stat={displayedCharacter.attributes.instinct} />
+            <AttributeBox name="Presence" stat={displayedCharacter.attributes.presence} />
+            <AttributeBox name="Knowledge" stat={displayedCharacter.attributes.knowledge} />
           </div>
 
           <div className="secondary-stats-line">
-            <div className="stat-pill stat-pill-small">Evasion: <strong>{character.stats.evasion}</strong></div>
-            <div className="stat-pill stat-pill-small">Damage Thresholds: <strong>{character.thresholds.minor} / {character.thresholds.major}</strong></div>
+            <div className="stat-pill stat-pill-small">Evasion: <strong>{displayedCharacter.stats.evasion}</strong></div>
+            <div className="stat-pill stat-pill-small">Damage Thresholds: <strong>{displayedCharacter.thresholds.minor} / {displayedCharacter.thresholds.major}</strong></div>
           </div>
 
           <div className="stats-grid">
             <StatBox
               label="HP"
-              current={character.stats.hp.current}
-              max={character.stats.hp.max}
+              current={displayedCharacter.stats.hp.current}
+              max={displayedCharacter.stats.hp.max}
               color="#2d5016"
               icon="❤️"
               editable
-              onCurrentChange={(value) => setCharacter(prev => ({
-                ...prev,
-                stats: { ...prev.stats, hp: { ...prev.stats.hp, current: value } }
-              }))}
+              showXWhenEmpty
+              onCurrentChange={(value) => updateStatAndSave('hp', value)}
             />
             <StatBox
               label="Stress"
-              current={character.stats.stress.current}
-              max={character.stats.stress.max}
+              current={displayedCharacter.stats.stress.current}
+              max={displayedCharacter.stats.stress.max}
               color="#a8dadc"
               icon="🧠"
               editable
-              onCurrentChange={(value) => setCharacter(prev => ({
-                ...prev,
-                stats: { ...prev.stats, stress: { ...prev.stats.stress, current: value } }
-              }))}
+              onCurrentChange={(value) => updateStatAndSave('stress', value)}
             />
             <StatBox
               label="Hope"
-              current={character.stats.hope.current}
-              max={character.stats.hope.max}
+              current={displayedCharacter.stats.hope.current}
+              max={displayedCharacter.stats.hope.max}
               color="#f1faee"
               textDark
               icon="⬆️"
               editable
-              onCurrentChange={(value) => setCharacter(prev => ({
-                ...prev,
-                stats: { ...prev.stats, hope: { ...prev.stats.hope, current: value } }
-              }))}
+              onCurrentChange={(value) => updateStatAndSave('hope', value)}
             />
             <StatBox
               label="Armor"
-              current={character.stats.armor.current}
-              max={character.stats.armor.max}
+              current={displayedCharacter.stats.armor.current}
+              max={displayedCharacter.stats.armor.max}
               color="#444"
               icon="🛡️"
               editable
-              onCurrentChange={(value) => setCharacter(prev => ({
-                ...prev,
-                stats: { ...prev.stats, armor: { ...prev.stats.armor, current: value } }
-              }))}
+              showXWhenEmpty
+              onCurrentChange={(value) => updateStatAndSave('armor', value)}
             />
           </div>
         </div>
@@ -447,15 +543,18 @@ function App() {
         <div className="column side-column">
           <div className="card-deck-desktop">
             <h2>Domain</h2>
-            {domainCards.map((card, index) => (
+            {activeDomainCards.map((card, index) => (
               <div key={index} className="card domain-card">
                 <small>{card.type}</small>
+                {card.recallCost !== undefined && (
+                  <small className="recall-cost">Recall Cost: {card.recallCost}</small>
+                )}
                 <h3>{card.title}</h3>
                 <ReactMarkdown>{card.text}</ReactMarkdown>
               </div>
             ))}
           </div>
-          {isMobile && <CardDeck cards={domainCards} title="Domain" variant="domain" />}
+          {isMobile && <CardDeck cards={activeDomainCards} title="Domain" variant="domain" />}
         </div>
       </div>
 
